@@ -1,0 +1,38 @@
+receivers:
+  otlp:
+    protocols:
+      grpc: {endpoint: '0.0.0.0:4317'}
+      http: {endpoint: '0.0.0.0:4318'}
+  filelog:
+    include: [/logs/*.json]
+    start_at: beginning
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05.999999999Z07:00'
+      - type: move
+        from: attributes.service
+        to: resource['service.name']
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+  batch: {timeout: 1s}
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls: {insecure: true}
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+    logs:
+      receivers: [filelog, otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/loki]

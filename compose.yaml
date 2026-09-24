@@ -1,0 +1,160 @@
+name: observability-demo
+x-db: &db
+  image: postgres:17.6-alpine
+  environment:
+    POSTGRES_USER: demo
+    POSTGRES_PASSWORD: demo
+    POSTGRES_DB: demo
+  healthcheck:
+    test: [CMD-SHELL, pg_isready -U demo -d demo]
+    interval: 3s
+    timeout: 3s
+    retries: 30
+x-app-env: &app-env
+  APP_PORT: 8080
+  DB_USER: demo
+  DB_PASSWORD: demo
+  DB_NAME: demo
+  REDIS_ADDR: redis:6379
+  LOG_DIR: /logs
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_INSECURE: 'true'
+  DEMO_MODE: 'true'
+x-app: &app
+  restart: unless-stopped
+  volumes: [app-logs:/logs]
+  healthcheck:
+    test: [CMD, wget, -q, -O, /dev/null, http://localhost:8080/health]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+services:
+  user-db:
+    <<: *db
+    ports: ['127.0.0.1:5433:5432']
+    volumes: [user-db:/var/lib/postgresql/data]
+  order-db:
+    <<: *db
+    ports: ['127.0.0.1:5434:5432']
+    volumes: [order-db:/var/lib/postgresql/data]
+  payment-db:
+    <<: *db
+    ports: ['127.0.0.1:5435:5432']
+    volumes: [payment-db:/var/lib/postgresql/data]
+  kong-db:
+    <<: *db
+    ports: ['127.0.0.1:5436:5432']
+    volumes: [kong-db:/var/lib/postgresql/data]
+  redis:
+    image: redis:7.4.5-alpine
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  auth-user-service:
+    <<: *app
+    build: ./auth-user-service
+    environment:
+      <<: *app-env
+      DB_HOST: user-db
+    depends_on:
+      user-db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      otel-collector: {condition: service_started}
+  payment-service:
+    <<: *app
+    build: ./payment-service
+    environment:
+      <<: *app-env
+      DB_HOST: payment-db
+    depends_on:
+      payment-db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      otel-collector: {condition: service_started}
+  order-service:
+    <<: *app
+    build: ./order-service
+    environment:
+      <<: *app-env
+      DB_HOST: order-db
+      USER_SERVICE_URL: http://auth-user-service:8080
+      PAYMENT_SERVICE_URL: http://payment-service:8080
+    depends_on:
+      order-db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      auth-user-service: {condition: service_healthy}
+      payment-service: {condition: service_healthy}
+  kong-migrations:
+    image: kong:3.9.1
+    command: kong migrations bootstrap
+    environment: &kong-env
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_DATABASE: demo
+      KONG_PG_USER: demo
+      KONG_PG_PASSWORD: demo
+    depends_on:
+      kong-db: {condition: service_healthy}
+  api-gateway:
+    image: kong:3.9.1
+    environment:
+      <<: *kong-env
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+      KONG_TRACING_INSTRUMENTATIONS: all
+      KONG_TRACING_SAMPLING_RATE: '1.0'
+    ports: ['127.0.0.1:8000:8000', '127.0.0.1:8001:8001']
+    depends_on:
+      kong-migrations: {condition: service_completed_successfully}
+      order-service: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, kong, health]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.123.0
+    command: ['--config=/etc/otel.yaml']
+    volumes: ['./observability/otel.yaml:/etc/otel.yaml:ro', 'app-logs:/logs:ro']
+    depends_on: [tempo, loki]
+  tempo:
+    image: grafana/tempo:2.7.2
+    command: ['-config.file=/etc/tempo.yaml']
+    volumes: ['./observability/tempo.yaml:/etc/tempo.yaml:ro', 'tempo:/var/tempo']
+    ports: ['127.0.0.1:3200:3200']
+  loki:
+    image: grafana/loki:3.4.2
+    command: ['-config.file=/etc/loki.yaml']
+    volumes: ['./observability/loki.yaml:/etc/loki.yaml:ro', 'loki:/loki']
+    ports: ['127.0.0.1:3100:3100']
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command: ['--config.file=/etc/prometheus/prometheus.yaml', '--enable-feature=exemplar-storage']
+    volumes: ['./observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro', 'prometheus:/prometheus']
+    ports: ['127.0.0.1:9090:9090']
+  grafana:
+    image: grafana/grafana:11.6.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: demo-observability
+    volumes: ['./observability/grafana/provisioning:/etc/grafana/provisioning:ro', './observability/grafana/dashboards:/var/lib/grafana/dashboards:ro', 'grafana:/var/lib/grafana']
+    ports: ['127.0.0.1:3000:3000']
+    depends_on: [prometheus, loki, tempo]
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.18.2
+    environment:
+      SWAGGER_JSON: /openapi.yaml
+    volumes:
+      - ./api-gateway/openapi.yaml:/openapi.yaml:ro
+    ports: ['127.0.0.1:8088:8080']
+volumes:
+  user-db:
+  order-db:
+  payment-db:
+  kong-db:
+  app-logs:
+  tempo:
+  loki:
+  prometheus:
+  grafana:
