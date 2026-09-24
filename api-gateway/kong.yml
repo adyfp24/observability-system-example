@@ -1,0 +1,39 @@
+# Reference declarative configuration. The running Postgres-backed gateway is
+# configured idempotently by ../scripts/configure-gateway.py via its Admin API.
+_format_version: '3.0'
+services:
+  - name: auth-user-service
+    url: http://auth-user-service:8080
+    routes:
+      - name: auth-user-service
+        paths: [/api/v1/auth, /api/v1/users]
+        strip_path: false
+  - name: order-service
+    url: http://order-service:8080
+    routes:
+      - name: order-service
+        paths: [/api/v1/orders]
+        strip_path: false
+  - name: payment-service
+    url: http://payment-service:8080
+    routes:
+      - name: payment-service
+        paths: [/api/v1/wallets]
+        strip_path: false
+plugins:
+  - name: cors
+    config:
+      origins: ['*']
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      headers: ['*']
+      credentials: true
+  - name: opentelemetry
+    config:
+      traces_endpoint: http://otel-collector:4318/v1/traces
+      resource_attributes: {service.name: api-gateway}
+      propagation: {default_format: w3c}
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true

@@ -1,0 +1,416 @@
+openapi: 3.0.3
+info:
+  title: Kong Microservices API Gateway Documentation
+  description: |
+    Dokumentasi terpusat seluruh API Microservices yang di-expose melalui **Kong API Gateway** (`http://localhost:8000/api/v1`).
+    
+    Termasuk layanan:
+    - **Auth & User Service** (`/auth/*`, `/users/*`)
+    - **Order Service** (`/orders/*`)
+    - **Payment Service** (`/wallets/*`)
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Kong API Gateway (Local)
+paths:
+  /auth/register:
+    post:
+      tags:
+        - Auth & User
+      summary: Registrasi Pengguna Baru
+      description: Mendaftarkan customer, driver, atau admin baru.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              name: "Demo Customer"
+              phone_number: "081234567890"
+              password: "demo-password"
+              role: "customer"
+      responses:
+        '201':
+          description: Berhasil terdaftar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Validasi gagal atau nomor telepon sudah terdaftar
+
+  /auth/login:
+    post:
+      tags:
+        - Auth & User
+      summary: Login Pengguna
+      description: Mengautentikasi pengguna dan mengembalikan ID serta token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              phone_number: "081234567890"
+              password: "demo-password"
+      responses:
+        '200':
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Kredensial tidak valid
+
+  /users/{id}:
+    get:
+      tags:
+        - Auth & User
+      summary: Ambil Profil Pengguna
+      description: Mengambil informasi detail profil berdasarkan ID Pengguna.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Detail pengguna ditemukan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '404':
+          description: Pengguna tidak ditemukan
+
+  /orders:
+    post:
+      tags:
+        - Orders
+      summary: Buat Pemesanan (Checkout Order)
+      description: |
+        Membuat pesanan baru. Order Service akan memanggil User Service untuk validasi profil
+        dan memanggil Payment Service untuk pemotongan saldo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+            example:
+              user_id: 1
+              origin_lat: -6.2
+              origin_lng: 106.8
+              destination_lat: -6.3
+              destination_lng: 106.9
+              fare: 25000
+              payment_delay_ms: 0
+      responses:
+        '201':
+          description: Pesanan berhasil dibuat dan dibayar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '500':
+          description: Gagal memproses pesanan (misal saldo tidak cukup atau user tidak ditemukan)
+
+  /orders/{id}:
+    get:
+      tags:
+        - Orders
+      summary: Ambil Detail Pesanan
+      description: Mendapatkan status dan detail pesanan berdasarkan ID Pesanan.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Detail pesanan ditemukan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '404':
+          description: Pesanan tidak ditemukan
+
+  /orders/{id}/status:
+    patch:
+      tags:
+        - Orders
+      summary: Update Status Pesanan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: "completed"
+      responses:
+        '200':
+          description: Status berhasil diperbarui
+
+  /wallets/{user_id}:
+    get:
+      tags:
+        - Payment & Wallets
+      summary: Ambil Saldo Dompet (Wallet)
+      description: Mendapatkan informasi saldo dompet berdasarkan ID Pengguna.
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Informasi wallet ditemukan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+
+  /wallets/topup:
+    post:
+      tags:
+        - Payment & Wallets
+      summary: Isi Ulang Saldo (Top Up)
+      description: Menambahkan saldo ke dompet pengguna.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopUpRequest'
+            example:
+              user_id: 1
+              amount: 100000
+      responses:
+        '200':
+          description: Topup berhasil
+        '400':
+          description: Data tidak valid
+
+  /wallets/pay:
+    post:
+      tags:
+        - Payment & Wallets
+      summary: Pembayaran / Potong Saldo
+      description: Melakukan pemotongan saldo dari dompet pengguna.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+            example:
+              user_id: 1
+              amount: 25000
+              description: "Pembayaran Order #1"
+      responses:
+        '200':
+          description: Pembayaran berhasil
+        '400':
+          description: Saldo tidak mencukupi atau nominal invalid
+
+components:
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - name
+        - phone_number
+        - password
+        - role
+      properties:
+        name:
+          type: string
+          example: "Demo Customer"
+        phone_number:
+          type: string
+          example: "081234567890"
+        password:
+          type: string
+          example: "demo-password"
+        role:
+          type: string
+          enum: [customer, driver, admin]
+          example: "customer"
+        vehicle_type:
+          type: string
+          enum: [car_premium, car_regular, bike]
+          example: "car_regular"
+
+    LoginRequest:
+      type: object
+      required:
+        - phone_number
+        - password
+      properties:
+        phone_number:
+          type: string
+          example: "081234567890"
+        password:
+          type: string
+          example: "demo-password"
+
+    LoginResponse:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          example: 1
+        token:
+          type: string
+          example: "mock-jwt-token"
+        role:
+          type: string
+          example: "customer"
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Demo Customer"
+        phone_number:
+          type: string
+          example: "081234567890"
+        role:
+          type: string
+          example: "customer"
+
+    CreateOrderRequest:
+      type: object
+      required:
+        - user_id
+        - origin_lat
+        - origin_lng
+        - destination_lat
+        - destination_lng
+        - fare
+      properties:
+        user_id:
+          type: integer
+          example: 1
+        origin_lat:
+          type: number
+          format: double
+          example: -6.2
+        origin_lng:
+          type: number
+          format: double
+          example: 106.8
+        destination_lat:
+          type: number
+          format: double
+          example: -6.3
+        destination_lng:
+          type: number
+          format: double
+          example: 106.9
+        fare:
+          type: number
+          format: double
+          example: 25000
+        payment_delay_ms:
+          type: integer
+          description: Penundaan buatan (ms) untuk simulasi latensi (0 - 2000 ms)
+          example: 0
+
+    OrderResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        user_id:
+          type: integer
+          example: 1
+        driver_id:
+          type: integer
+          nullable: true
+          example: null
+        fare:
+          type: number
+          format: double
+          example: 25000
+        status:
+          type: string
+          enum: [created, paid, payment_failed, payment_unknown]
+          example: "paid"
+        user_name:
+          type: string
+          example: "Demo Customer"
+        created_at:
+          type: string
+          example: "2026-09-24T12:00:00Z"
+
+    WalletResponse:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          example: 1
+        balance:
+          type: number
+          format: double
+          example: 100000
+        updated_at:
+          type: string
+          example: "2026-09-24T12:00:00Z"
+
+    TopUpRequest:
+      type: object
+      required:
+        - user_id
+        - amount
+      properties:
+        user_id:
+          type: integer
+          example: 1
+        amount:
+          type: number
+          format: double
+          example: 100000
+
+    PaymentRequest:
+      type: object
+      required:
+        - user_id
+        - amount
+        - description
+      properties:
+        user_id:
+          type: integer
+          example: 1
+        amount:
+          type: number
+          format: double
+          example: 25000
+        description:
+          type: string
+          example: "Pembayaran Order #1"

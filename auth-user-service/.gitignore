@@ -1,0 +1,19 @@
+# Binaries
+/okejek-auth-user-service
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Environments
+.env
+.env.local
+
+# Logs
+/storage/logs/
+*.log
+
+# Docker Volumes
+/postgres_data/
+/redis_data/
+/storage/

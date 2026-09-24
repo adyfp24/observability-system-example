@@ -1,0 +1,3 @@
+# Run the complete demo from this directory or the repository root.
+include:
+  - ../compose.yaml
